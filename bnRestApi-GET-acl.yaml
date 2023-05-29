@@ -1,0 +1,22 @@
+---
+- name: BN Restful API GET request
+  hosts: localhost
+  gather_facts: no
+
+  tasks:
+     - name: Get ACL status
+       uri:
+         url: https://10.122.20.20:8443/sbc/status/acl
+         method: GET
+         user: Your_User_Name
+         password: Your_Password
+         headers:
+           Accept: application/json
+         validate_certs: false
+         status_code: 200
+         return_content: yes
+       register: acl_status
+
+     - name: Print ACL status
+       debug:
+         var: acl_status.content

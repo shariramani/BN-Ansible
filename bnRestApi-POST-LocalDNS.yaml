@@ -1,0 +1,42 @@
+---
+- name: BN Restful API POST request
+  hosts: localhost
+  gather_facts: no
+
+  tasks:
+     - name: POST Local DNS
+       uri:
+         url: https://10.122.20.20:8443/sbc/application/common/localdns
+         method: POST
+         body_format: json
+         body: {
+                 "list": [
+                       {
+                       "cfgStatus": "No",
+                       "host": "10.108.70.106",
+                       "id": 0,
+                       "note": "MyNote",
+                       "port": 5070,
+                       "priority": 1,
+                       "protocol": "UDP",
+                       "resolvedAddressType": "IPv4",
+                       "uri": [ "shtest.com" ],
+                       "weight": 1
+                       }
+                      ],
+                  "maintainId": false,
+                  "operationId": 0,
+                  "totalrecords": 0
+                  }
+         user: Your_User_Name
+         password: Your_Password
+         headers:
+           Accept: application/json
+         validate_certs: false
+         status_code: 201
+         return_content: yes
+       register: dns_post_response
+
+     - name: Print dns_post_response
+       debug:
+         var: dns_post_response.content

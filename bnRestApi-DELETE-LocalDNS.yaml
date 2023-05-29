@@ -1,0 +1,26 @@
+---
+- name: BN Restful API DELETE request
+  hosts: localhost
+  gather_facts: no
+
+  tasks:
+     - name: DELETE Local DNS
+       uri:
+         url: https://10.122.20.20:8443/sbc/application/common/localdns
+         method: DELETE
+         body_format: json
+         body: {
+           "ids": [ "5" ]
+           }
+         user: Your_User_Name
+         password: Your_Password
+         headers:
+           Accept: application/json
+         validate_certs: false
+         status_code: 200
+         return_content: yes
+       register: dns_post_response
+
+     - name: Print dns_post_response
+       debug:
+         var: dns_post_response.content
