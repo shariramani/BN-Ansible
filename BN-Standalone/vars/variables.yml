@@ -1,0 +1,12 @@
+---
+var_vpc_cidr: 172.28.0.0/16
+var_public_subnet: 172.28.1.0/24
+var_private_subnet: 172.28.2.0/24
+var_mgmt_subnet: 172.28.3.0/24
+var_instance_type: c5.large
+var_bn_version: 3.9.1-384
+var_region: us-east-1
+var_tag_purpose: test_ansible
+
+#suffix resource names
+var_mySuffix: _002

@@ -1,0 +1,353 @@
+---
+- name: Deploy Standalone BN image to AWS using Ansible
+  hosts: localhost
+  gather_facts: no
+
+  vars_files:
+    - ./vars/variables.yml
+
+
+  tasks:
+
+#display defined variables
+    - name: display variables having prefix var_
+      debug:
+        msg: "{{ item }}: {{ query('vars', item)|first }}"
+      loop: "{{ query('varnames', 'var_.+$') }}"
+      tags: [ 'debug' ]
+
+#Find AMI which we will deploy
+    - name: gather information about dialogic-bordernet AMIs published by Canonical (752666320341)
+      amazon.aws.ec2_ami_info:
+        owners: 752666320341
+        region: "{{ var_region }}"
+        filters:
+          name: "dialogic-bordernet-{{ var_bn_version }}*"
+      register: bn_version_id
+      tags: [ 'debug' ]
+
+#display full output of the found AMI
+    - name: information of AMI found
+      debug:
+        var: bn_version_id
+      tags: [ 'never', 'debug' ]
+
+#display image_id of found image available on aws
+    - name: display image_id
+      debug:
+        var: bn_version_id.images[0].image_id
+      tags: [ 'debug' ]
+
+# Create the vpc
+    - name: create BN vpc.
+      amazon.aws.ec2_vpc_net:
+        name: "BN_VPC{{ var_mySuffix }}"
+        cidr_block: "{{ var_vpc_cidr }}"
+        region: "{{ var_region }}"
+        tags:
+          module: ec2_vpc_net
+          purpose: "{{ var_tag_purpose }}"
+      register: vpc_id
+      tags: [ 'debug' ]
+      
+# display the created vpc.id
+    - name: display the created vpc.id
+      debug:
+        var: vpc_id.vpc.id
+      tags: [ 'debug' ]
+
+#Find availability zones
+    - name: Gather information about all availability zones in selected region
+      amazon.aws.aws_az_info:
+       region: "{{ var_region }}"
+       filters:
+        state: "available"
+      register: aws_avb_zone
+      tags: [ 'debug' ]
+
+#display all available AZ
+    - name: information1
+      debug:
+        var: aws_avb_zone
+      tags: [ 'never', 'debug' ]
+      
+#display only first availability zone
+    - name: Filter first AZ
+      debug:
+        var: aws_avb_zone.availability_zones[0].zone_name
+      tags: [ 'debug' ]
+
+# Creating Internet Gateway
+    - name: create internet gateway
+      amazon.aws.ec2_vpc_igw:
+        vpc_id: "{{ vpc_id.vpc.id }}"
+        region: "{{ var_region }}"
+        state: present
+        tags:
+          Name: "BN_IGW{{ var_mySuffix }}"
+          module: ec2_vpc_igw
+          purpose: "{{ var_tag_purpose }}"          
+      register: bn_igw_id
+      tags: [ 'debug' ]
+
+
+
+
+# mgmt subnet 
+    - name: create mgmt subnet
+      amazon.aws.ec2_vpc_subnet:
+        state: present
+        cidr:  "{{ var_mgmt_subnet }}"
+        region: "{{ var_region }}"
+        az: "{{ aws_avb_zone.availability_zones[0].zone_name }}"
+        vpc_id: "{{ vpc_id.vpc.id }}"
+        tags:
+          Name: "BN-MGMT-Subnet{{ var_mySuffix }}"
+          module: ec2_vpc_subnet
+          purpose: "{{ var_tag_purpose }}" 
+      register: mgmt_1a
+      tags: [ 'debug' ]
+
+# public subnet 
+    - name: create Public subnet
+      amazon.aws.ec2_vpc_subnet:
+        state: present
+        cidr:  "{{ var_public_subnet }}"
+        region: "{{ var_region }}"
+        az: "{{ aws_avb_zone.availability_zones[0].zone_name }}"
+        vpc_id: "{{ vpc_id.vpc.id }}"
+        tags:
+          Name: "BN-Public-Subnet{{ var_mySuffix }}"
+          module: ec2_vpc_subnet
+          purpose: "{{ var_tag_purpose }}"
+      register: public_1a
+      tags: [ 'debug' ]
+
+# private subnet 
+    - name: create private subnet
+      amazon.aws.ec2_vpc_subnet:
+        state: present
+        cidr:  "{{ var_private_subnet }}"
+        region: "{{ var_region }}"
+        az: "{{ aws_avb_zone.availability_zones[0].zone_name }}"
+        vpc_id: "{{ vpc_id.vpc.id }}"
+        tags:
+          Name: "BN-Private-Subnet{{ var_mySuffix }}"
+          module: ec2_vpc_subnet
+          purpose: "{{ var_tag_purpose }}"
+      register: private_1a
+      tags: [ 'debug' ]
+
+# Public Route Table
+    - name: create internet gateway route table
+      amazon.aws.ec2_vpc_route_table:
+        vpc_id: "{{ vpc_id.vpc.id }}"
+        region: "{{ var_region }}"
+        tags:
+          Name: "BN-RT{{ var_mySuffix }}"
+          module: ec2_vpc_route_table
+          purpose: "{{ var_tag_purpose }}"
+        subnets:
+          - "{{ mgmt_1a.subnet.id }}"
+          - "{{ public_1a.subnet.id }}"
+          - "{{ private_1a.subnet.id }}"
+        routes:
+          - dest: 0.0.0.0/0
+            gateway_id: "{{ bn_igw_id.gateway_id }}"
+      register: public_route_table
+      tags: [ 'debug' ]
+
+#Create a IAM role
+    - name: Create IAM role with description and tags
+      iam_role:
+        name: "bn_sa_role{{ var_mySuffix }}"
+        state: present
+        region: "{{ var_region }}"
+        assume_role_policy_document: "{{ lookup('file','assume_role_policy.json') }}"
+        description: This is Role for BN SA
+        tags:
+          module: iam_role
+          purpose: "{{ var_tag_purpose }}"
+      register: aws_iam_role1
+      tags: [ 'debug' ]
+
+#display created aws_iam_role1
+    - name: Print status
+      debug:
+         var: aws_iam_role1
+      tags: [ 'never','debug' ]      
+
+#display created aws_iam_role1
+    - name: Print status
+      debug:
+         var: aws_iam_role1
+      tags: [ 'never','debug' ] 
+
+# Add policy to above created IAM Role      
+    - name: Add policy to IAM Role
+      iam_policy:
+        iam_type: role
+        iam_name: "bn_sa_role{{ var_mySuffix }}"
+        state: present
+        policy_name: "bn_sa_role{{ var_mySuffix }}-policy"
+        policy_json: "{{ lookup('file','role_policy.json') }}"
+        region: "{{ var_region }}"
+      when: aws_iam_role1.changed
+      register: iam_policy1
+      tags: [ 'debug' ]
+
+#display
+    - name: Print status
+      debug:
+         var: iam_policy1
+      tags: [ 'never','debug' ]
+
+# create security group to allow traffic to the BN ec2 instances
+    - name: create private ec2 instance security group
+      amazon.aws.ec2_group:
+        name: "bn-ec2-sg{{ var_mySuffix }}"
+        description: allow internet-facing ALB access
+        vpc_id: "{{ vpc_id.vpc.id }}"
+        region: "{{ var_region }}"
+        tags:
+          Name: "bn-ec2-sg{{ var_mySuffix }}"
+          module: ec2_group
+          purpose: "{{ var_tag_purpose }}"
+        rules:
+          - proto: tcp
+            ports:
+            - 22
+            # replace IP with local machine IP
+            cidr_ip: 0.0.0.0/0
+            rule_desc: allow ssh traffic
+          - proto: tcp
+            ports:
+            - 443
+            cidr_ip: 0.0.0.0/0
+            rule_desc: allow traffic to BN GUI
+      register: bn_ec2_sg
+      tags: [ 'debug' ]
+
+# display
+    - name: Print status
+      debug:
+         var: bn_ec2_sg
+      tags: [ 'never','debug' ]
+
+
+# create mgmt network interface
+    - name: Create network interface
+      amazon.aws.ec2_eni:
+        region: "{{ var_region }}"
+        subnet_id: "{{ mgmt_1a.subnet.id }}"
+        description: "BN mgmt network interface"
+        security_groups: "{{ bn_ec2_sg.group_id }}"
+        state: present
+#        assign_public_ip: no
+        tags:
+          Name: "mgmt_int{{ var_mySuffix }}"
+          module: ec2_eni
+          purpose: "{{ var_tag_purpose }}"
+      register: mgmt_network_interface
+      tags: [ 'debug' ]
+
+# display
+    - name: Debug network interface details
+      debug:
+        var: mgmt_network_interface.interface.id
+      tags: [ 'debug' ]
+
+# Assign Public IP to mgmt network interface ENI
+    - name: Assign Public IP to mgmt
+      amazon.aws.ec2_eip:
+        region: "{{ var_region }}"
+        device_id: "{{ mgmt_network_interface.interface.id }}"
+        in_vpc: true
+        tags:
+          Name: "BN_MGMT_Pub{{ var_mySuffix }}"
+      register: mgmtInterface_public_ip_result
+      tags: [ 'debug' ]
+      
+# Display Public IP assignment       
+    - name: Print Public IP assignment status
+      debug:
+        var: mgmtInterface_public_ip_result
+      tags: [ 'debug' ]
+
+# create public network interface
+    - name: Create network interface
+      amazon.aws.ec2_eni:
+        region: "{{ var_region }}"
+        subnet_id: "{{ public_1a.subnet.id }}"
+        description: "BN public network interface"
+        security_groups: "{{ bn_ec2_sg.group_id }}"
+        state: present
+#        assign_public_ip: no
+        tags:
+          Name: "public_int{{ var_mySuffix }}"
+          module: ec2_eni
+          purpose: "{{ var_tag_purpose }}"
+      register: public_network_interface
+      tags: [ 'debug' ]
+
+# display
+    - name: Debug network interface details
+      debug:
+        var: public_network_interface.interface.id
+      tags: [ 'debug' ]
+
+# create private network interface
+    - name: Create network interface
+      amazon.aws.ec2_eni:
+        region: "{{ var_region }}"
+        subnet_id: "{{ private_1a.subnet.id }}"
+        description: "BN private network interface"
+        security_groups: "{{ bn_ec2_sg.group_id }}"
+        state: present
+#        assign_public_ip: no
+        tags:
+          Name: "private_int{{ var_mySuffix }}"
+          module: ec2_eni
+          purpose: "{{ var_tag_purpose }}"
+      register: private_network_interface
+      tags: [ 'debug' ]
+
+# display
+    - name: Debug network interface details
+      debug:
+        var: private_network_interface.interface.id
+      tags: [ 'debug' ]
+
+# Create first BN instance 
+    - name: create BN server1 ec2 instance with user data
+      amazon.aws.ec2_instance:
+        name: "Enghouse BorderNet SBC{{ var_mySuffix }}"
+        region: "{{ var_region }}"
+        state: present
+#        key_name: user1-ansible
+        instance_type: "{{ var_instance_type }}"
+#        security_group: "{{ bn_ec2_sg.group_id }}"
+        vpc_subnet_id: "{{ mgmt_1a.subnet.id }}"
+        network:
+          assign_public_ip: false
+          delete_on_termination: true
+          interfaces:
+            - id: "{{ mgmt_network_interface.interface.id }}"
+            - id: "{{ public_network_interface.interface.id }}"
+            - id: "{{ private_network_interface.interface.id }}"
+        image_id: "{{ bn_version_id.images[0].image_id }}"
+        iam_instance_profile: "bn_sa_role{{ var_mySuffix }}"
+#        user_data: "{{ lookup('file', 'user_data.sh') }}"
+        tags:
+          module: ec2_instance
+          purpose: "{{ var_tag_purpose }}"
+      register: bn1_instance
+      tags: [ 'debug' ]
+      
+# display
+    - name: instance details
+      debug:
+        msg:
+          - "var:{{ bn1_instance }}"
+          - "Access BN with url https://{{ mgmtInterface_public_ip_result.public_ip }}"
+      tags: [ 'debug' ]
